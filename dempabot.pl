@@ -554,6 +554,9 @@ sub forwardFollowList
 
 #mainルーチン
 sub main{
+	#とりあえず乱数の種を生成しておきます
+	srand(time^($$+($$<<15)));
+
 	#コマンドライン引数を受け取ります
 	if (@ARGV < 1) {
 		print "usage: command\n";
