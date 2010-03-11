@@ -1,36 +1,43 @@
-﻿#Dempabot
+#Dempabot
 #You need some module for expamle "XML::Simple" "Data::Dumper" "LWP::UserAgent" "MeCab" and so on.
+
+use strict;
+use Encode;
 
 #import some modules
 use LWP::UserAgent;
 use IO::File;
-
 use XML::Simple;
-
 use Data::Dumper;
-
-use MeCab;
-use Encode;
-
-use strict;
 
 #言語判定モジュール。
 use Lingua::LanguageGuesser;
 #twitterの検索結果はatomでしか受け取れないので、それのモジュール。
 use XML::FeedPP;
+#MeCab
+use MeCab;
+
+#ソースコードはUTF-8で記述される。
+use utf8;
+#基本的な入出力は全てUTF8だが、STDINとSTDOUT,STDERRのみは全てShiftJISとする。(設定は下の変数いじれば換えられる。)
+my $CPSTDIN = 'shiftjis';
+my $CPSTDOUT = 'shiftjis';
+my $CPSTDERR = 'shiftjis';
+use open ":utf8";
 
 #XML::Simpleのおまじない
 $XML::Simple::PREFERRED_PARSER = 'XML::Parser';
 
-#グローバル
-my $NOISE_FILE = 'noise.txt';
-my $PASSWORD_FILE = 'passwd.csv';
-my $MRCV_FILE = 'mrcv.txt';
-my $RAND_FILE = 'rand.txt';
+#ファイル名をあらわすグローバル変数
+my $NOISE_FILE = '../etc/noise.txt';
+my $PASSWORD_FILE = '../etc/passwd.csv';
+my $MRCV_FILE = '../etc/mrcv.txt';
+my $RAND_FILE = '../etc/rand.txt';
 my $LOCALREAD_FILE = 'localread.txt';
 my $LOCALMRCV_FILE = 'localmrcv.txt';
-my $FOLLOWLIST_FILE = 'followlist.txt';
-my $HTTPLOG_FILE = 'access.log';
+my $FOLLOWLIST_FILE = '../etc/followlist.txt';
+my $HTTPLOG_FILE = '../var/access.log';
+
 
 #2分探索でファイルの配列から色々探します
 #最初の二つが見つかれば1を返し、そのインデックスを返す。
@@ -104,7 +111,7 @@ sub findHeadWord
 sub genRandComment{
 	my($randfile) = @_;
 	
-	open(RND,$randfile);		
+	open(RND,$randfile) or die "$randfile CAN'T OPEN!!!\n";		
 	my @comment = <RND>;
 	chomp(@comment);
 	close(RND);
@@ -116,7 +123,7 @@ sub genRandComment{
 sub openMrcvFile{
 	my ($mrcname,$refmrc,$refheads) = @_;
 	
-	open(RMRC,"$mrcname");
+	open(RMRC,"$mrcname") or die "$mrcname CAN'T OPEN!!!\n";
 	
 	my $i=0;
 	foreach my $rawline(<RMRC>){
@@ -177,8 +184,15 @@ sub genMrcvComment{
 
 	openMrcvFile($mrcname,\@mrcfile,\@heads);
 		
-	#頭を選びます
-	my $head = $heads[int(rand(@heads))];
+	#文頭
+	my $head;
+	
+	#もし@始まりを選んだ場合、やり直す。
+	do{
+		#頭を取ってきます
+		$head = $heads[int(rand(@heads))];
+	}while($mrcfile[$head][1] eq '@');
+	
     #今の読み出し位置
 	my $nowread = $head;
 	
@@ -211,7 +225,7 @@ sub getNoise
 	my($noisefile,$refnoise) = @_;
 	
 	#ノイズファイルを開きます
-	open(NIS,$noisefile);
+	open(NIS,$noisefile) or die "$noisefile CAN'T OPEN!!!\n";
 	@$refnoise = <NIS>;
 	chomp(@$refnoise);
 	close(NIS);
@@ -226,8 +240,6 @@ sub genNormalizeNoise
 		
 	my $randstr = $refnoise->[int(rand(@$refnoise))];
 	my $randlen = int(rand($max-$min+1)) + $min;
-		
-	$randstr = Encode::decode_utf8($randstr);	
 
 	my $randpos = int(rand(length($randstr)));
 	if(length($randstr)-$randpos < $randlen){ $randpos = length($randstr)-$randlen; }
@@ -235,9 +247,7 @@ sub genNormalizeNoise
 	#print $randpos.':'.$randlen."\n";
 	
 	$randstr = substr($randstr,$randpos,$randlen);
-	$randstr =~ s/\r//g;
-	$randstr =~ s/\n//g;
-	$randstr = Encode::encode_utf8($randstr);	
+	$randstr =~ s/[\r\n]//g;
 	
 	return $randstr;
 }
@@ -247,21 +257,27 @@ sub TransToSplitArray{
 	my ($plane) = @_;
 
 	#文字コード
-	Encode::_utf8_off($plane);
-	Encode::from_to($plane,"utf8","eucjp");
 	my $mecab = new MeCab::Tagger("");
-	my $node = $mecab->parseToNode($plane);
-	Encode::from_to($plane,"eucjp","utf8");
-			
+	my $mecabDicInfo = $mecab->dictionary_info();
+	my $charset = $mecabDicInfo->swig_charset_get();
+	
+	#encodeしたものをわたすこと
+	my $node = $mecab->parseToNode(Encode::encode($charset,$plane));
+	
 	#ぶつ切り文章作成
 	my @wordlist = ();
 	while($node = $node->{next}){
-		my $reads = $node->{surface};
-		Encode::from_to($reads,"eucjp","utf8");		
-	    push(@wordlist,$reads);
+	
+		#encodeされているのでdecodeする。
+		my $read = $node->{surface};
+		Encode::from_to($read,$charset,'utf8');
+		$read = Encode::decode('utf8',$read);
+		
+		#つなぐ
+	    push(@wordlist,$read);
 	}
 	pop(@wordlist); #ケツにいらないのがあるので消す
-	
+
 	return @wordlist;
 }
 
@@ -287,6 +303,8 @@ sub addNoise
 #ボットコメント生成
 sub genBotComment
 {
+	my($mrcvname) = @_;
+
 	#ランダム値
 	my $selectbase = int(rand(10000));
 	#ノイズ度
@@ -332,7 +350,7 @@ sub genBotComment
 	#動作実行
 	my $gentext = '';
 	#生成エンジン
-	if   ($genSystem == 1){ $gentext = genMrcvComment($MRCV_FILE); }
+	if   ($genSystem == 1){ $gentext = genMrcvComment($mrcvname); }
 	elsif($genSystem == 2){ $gentext = genRandComment($RAND_FILE); }
 	#ノイズ付加
 	$gentext = addNoise($gentext,$maxnoiselength,$minnoiselength);
@@ -343,9 +361,7 @@ sub genBotComment
 	}
 	
 	#文字の長さを160文字に切る
-	$gentext = Encode::decode_utf8($gentext);
 	$gentext = substr($gentext,0,160);
-	$gentext = Encode::encode_utf8($gentext);
 
 	#生成した文章を返す	
 	return $gentext;
@@ -374,9 +390,7 @@ sub RefleshMarcov{
 		#表示
 		if($stout == "1"){
 			foreach my $val(@wordlist){
-				Encode::from_to($val,"utf8","shiftjis");
-				print STDOUT "$val".' ';
-				Encode::from_to($val,"shiftjis","utf8");
+				print STDOUT Encode::encode($CPSTDOUT,$val)." <> ";
 			}
 			print STDOUT "\n";
 		}
@@ -514,8 +528,8 @@ sub connectbyHTTP
 	# レスポンスの結果をチェックします
 	if ($res->is_error()) {
 	     print "Bad luck this time\n";
-	     print "$url\n";
-	     die $!;
+	     print Encode::encode($CPSTDOUT,$url)."\n";
+	     die Encode::encode($CPSTDOUT,$!);
 	}
 	
 	#返します
@@ -579,7 +593,7 @@ sub main{
 	if($command eq "read"){
 	
 		#コマンド設定
-		$command_url .= 'statuses/friends_timeline.xml?count=100'; 
+		$command_url .= 'statuses/friends_timeline.xml?count=200'; 
 		#アクセス
 		my $res = connectbyHTTP($command_url,'GET');
 		
@@ -609,7 +623,7 @@ sub main{
 	{
 		#コマンド設定
 		$command_url .= 'statuses/update.xml?status=';
-		$command_url .= ''.genBotComment().'';
+		$command_url .= ''.genBotComment($MRCV_FILE).'';
 		#接続
 		my $res = connectbyHTTP($command_url,'POST');
 	}
@@ -623,22 +637,24 @@ sub main{
 	}
 
 	#ローカルで文章ファイルを読み取り,本物のMRCVを更新します。
-	elsif($command eq "reflesh_mrcv_local"){
+	elsif($command eq "read_bylocal"){
 		open(PLN,$LOCALREAD_FILE);
 		my @init = <PLN>;
 		RefleshMarcov($MRCV_FILE,0,@init);
 		close(PLN);
 	}
+	#本番どおりの設定を使いつつ、生成した文章をローカルに出力します。
+	elsif($command eq "post_tolocal"){
+		my $t = genBotComment($MRCV_FILE);
 
+		print STDOUT Encode::encode($CPSTDOUT,$t)."\n";
+	}
 
-	#ローカルで文章を生成します
+	#別のマルコフファイルを使い、ローカルで文章を生成します
 	elsif($command eq "post_local"){
-		my $t = genBotComment();
+		my $t = genBotComment($LOCALMRCV_FILE);
 
-		Encode::from_to($t,"utf8","shiftjis");
-		print STDOUT $t."\n";
-		Encode::from_to($t,"shiftjis","utf8");
-	
+		print STDOUT Encode::encode($CPSTDOUT,$t)."\n";
 	}
 	
 	#返答を読みます
@@ -667,7 +683,7 @@ sub main{
 		#リスト読みこみ
 		my $readuser = forwardFollowList($FOLLOWLIST_FILE,1);
 		#コマンド設定
-		$command_url .= 'statuses/user_timeline.xml?count=100&id='.$readuser; 
+		$command_url .= 'statuses/user_timeline.xml?count=200&id='.$readuser; 
 		#アクセス
 		my $res = connectbyHTTP($command_url,'GET');
 		#分けて保存する苦肉の策
@@ -689,7 +705,7 @@ sub main{
 	
 	#コマンドが無いよ
 	else{
-		print 'You executed the command "'.$command.'" but it isn\'t supported.';
+		print 'You executed the command "'.Encode::encode($CPSTDOUT,$command).'" but it isn\'t supported.';
 	}
 	
 	return 0;

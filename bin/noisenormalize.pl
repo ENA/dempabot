@@ -1,4 +1,4 @@
-﻿use List::Util 'shuffle';
+use List::Util 'shuffle';
 use IO::File;
 
 use Encode;
@@ -25,8 +25,7 @@ sub main{
 	foreach my $line(@noise){
 		$outtext .= $line;
 	}
-	$outtext =~ s/ //g;
-	$outtext =~ s/\t//g;
+	$outtext =~ s/[ \t]//g;
 
 	$outtext = Encode::decode_utf8($outtext);		
 
