@@ -111,7 +111,7 @@ sub findHeadWord
 sub genRandComment{
 	my($randfile) = @_;
 	
-	open(RND,">$randfile") or die "$randfile CAN'T OPEN!!!\n";		
+	open(RND,"$randfile") or die "$randfile CAN'T OPEN!!!\n";		
 	my @comment = <RND>;
 	chomp(@comment);
 	close(RND);
@@ -123,7 +123,7 @@ sub genRandComment{
 sub openMrcvFile{
 	my ($mrcname,$refmrc,$refheads) = @_;
 	
-	open(RMRC,">$mrcname") or die "$mrcname CAN'T OPEN!!!\n";
+	open(RMRC,"$mrcname") or die "$mrcname CAN'T OPEN!!!\n";
 	
 	my $i=0;
 	foreach my $rawline(<RMRC>){
