@@ -28,6 +28,10 @@ use open ":utf8";
 #XML::Simpleのおまじない
 $XML::Simple::PREFERRED_PARSER = 'XML::Parser';
 
+#Twitter Oauth
+use Net::Twitter::Lite;
+
+
 #ファイル名をあらわすグローバル変数
 my $NOISE_FILE = '../etc/noise.txt';
 my $PASSWORD_FILE = '../etc/passwd.csv';
@@ -577,55 +581,38 @@ sub main{
 		exit(0);
 	}
 	
-	#パスワードファイルを開きます	
+	#パスワードファイルを読む	
 	open(PSW,$PASSWORD_FILE);
 	my @userdata = split(",",<PSW>);
 	close(PSW);
+	my ($CONSUMER_KEY,$CONSUMER_SECRET,$ACCESS_TOKEN,$ACCESS_TOKEN_SECRET) = @userdata;
 	
-	#パスワード設定	
-	my ($screen_name,$passwd) = @userdata;
 	
-	#コマンド準備
-	my $command = $ARGV[0];
-	my $command_url = 'http://'."$screen_name:$passwd".'@'.'twitter.com/';
+	#OAuth準備
+	my $oauthobj = Net::Twitter::Lite->new(
+		traits => [qw/API::REST OAuth WrapError/],
+		consumer_key => $CONSUMER_KEY,
+		consumer_secret => $CONSUMER_SECRET,
+		ssl => 1
+	);
+	$oauthobj->access_token($ACCESS_TOKEN);
+	$oauthobj->access_token_secret($ACCESS_TOKEN_SECRET);
+	
 	
 	#コマンドごとの処理
+	my $command = $ARGV[0];
 	if($command eq "read"){
-	
-		#コマンド設定
-		$command_url .= 'statuses/friends_timeline.xml?count=200'; 
-		#アクセス
-		my $res = connectbyHTTP($command_url,'GET');
-		
-		#分けて保存する苦肉の策
-		my $temp = $res->content;
-		my $rData = XMLin($temp);
-		
-		
-		#foreachでXMLの中身のtextを読みこみ
-		my @xmltext = ();
-		#XMLのstatusタグに関してループ
-		foreach my $keyval(keys(%{$rData->{'status'}})){
-			#呟き本文
-			my $tplane = $rData->{'status'}->{$keyval}->{'text'};
-			
-			#自分は省く
-			if($rData->{'status'}->{$keyval}->{'user'}->{'screen_name'} ne $screen_name) { push(@xmltext,$tplane); }
-		}
-		
-		#マルコフ処理
-		RefleshMarcov($MRCV_FILE,0,@xmltext);
+		my @addtext = ();
+		my $array_ref = $oauthobj->friends_timeline({count => '200'});
+		foreach my $hash_ref(@$array_ref){ push(@addtext,$hash_ref->{'text'}); }
+		RefleshMarcov($MRCV_FILE,0,@addtext);
 		
 	}
 	
 	#通常投稿
 	elsif($command eq "post")
 	{
-		#コマンド設定
-		$command_url .= 'statuses/update.xml?status=';
-		$command_url .= ''.genBotComment($MRCV_FILE).'';
-		#接続
-		my $res = connectbyHTTP($command_url,'POST');
+		$oauthobj->update({ status => genBotComment($MRCV_FILE) });
 	}
 	
 	#ローカルで文章ファイルを読み取りますが、MRCVは別に出力します。
@@ -660,47 +647,19 @@ sub main{
 	#返答を読みます
 	elsif($command eq "read_rep")
 	{
-		#コマンド設定
-		$command_url .= 'statuses/replies.xml?count=50';
-				
-		#接続
-		my $res = connectbyHTTP($command_url,'GET');
-		my $rData = XMLin($res->content);
-		
-		#foreachでXMLの中身のtextを読みこみ
-		my @xmltext = ();
-		foreach my $keyval(keys(%{$rData->{'status'}})){
-			my $tplane = $rData->{'status'}->{$keyval}->{'text'};
-			push(@xmltext,$tplane);
-		}
-		
-		#マルコフ処理
-		RefleshMarcov($MRCV_FILE,0,@xmltext);
+		my @addtext = ();
+		my $array_ref = $oauthobj->mentions({count => '200'});
+		foreach my $hash_ref(@$array_ref){ push(@addtext,$hash_ref->{'text'}); }
+		RefleshMarcov($MRCV_FILE,1,@addtext);
 	}
 	
 	#フォローリストに従い、一番上のユーザーの発言を読みこみ、リストの一番下に回します。
 	elsif($command eq "read_byfollowlist"){
-		#リスト読みこみ
+		my @addtext = ();
 		my $readuser = forwardFollowList($FOLLOWLIST_FILE,1);
-		#コマンド設定
-		$command_url .= 'statuses/user_timeline.xml?count=200&id='.$readuser; 
-		#アクセス
-		my $res = connectbyHTTP($command_url,'GET');
-		#分けて保存する苦肉の策
-		my $temp = $res->content;
-		my $rData = XMLin($temp);
-		
-		#foreachでXMLの中身のtextを読みこみ
-		my @xmltext = ();
-		#XMLのstatusタグに関してループ
-		foreach my $keyval(keys(%{$rData->{'status'}})){
-			#呟き本文
-			my $tplane = $rData->{'status'}->{$keyval}->{'text'};
-			push(@xmltext,$tplane);
-		}
-		
-		#マルコフ処理
-		RefleshMarcov($MRCV_FILE,1,@xmltext);
+		my $array_ref = $oauthobj->user_timeline({id => $readuser , count => '200'});
+		foreach my $hash_ref(@$array_ref){ push(@addtext,$hash_ref->{'text'}); }
+		RefleshMarcov($MRCV_FILE,0,@addtext);
 	}
 	
 	#コマンドが無いよ
