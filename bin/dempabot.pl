@@ -2,6 +2,7 @@
 #You need some module for expamle "XML::Simple" "Data::Dumper" "LWP::UserAgent" "MeCab" and so on.
 
 use strict;
+use warnings;
 use Encode;
 
 #import some modules
@@ -573,7 +574,7 @@ sub forwardFollowList
 #mainルーチン
 sub main{
 	#とりあえず乱数の種を生成しておきます
-	srand(time^($$+($$<<15)));
+	srand(time^($$+($$ << 15)));
 
 	#コマンドライン引数を受け取ります
 	if (@ARGV < 1) {
@@ -585,6 +586,7 @@ sub main{
 	open(PSW,$PASSWORD_FILE);
 	my @userdata = split(",",<PSW>);
 	close(PSW);
+	chomp @userdata;
 	my ($CONSUMER_KEY,$CONSUMER_SECRET,$ACCESS_TOKEN,$ACCESS_TOKEN_SECRET) = @userdata;
 	
 	
@@ -595,13 +597,19 @@ sub main{
 		consumer_secret => $CONSUMER_SECRET,
 		ssl => 1
 	);
+
 	$oauthobj->access_token($ACCESS_TOKEN);
 	$oauthobj->access_token_secret($ACCESS_TOKEN_SECRET);
-	
+
 	
 	#コマンドごとの処理
 	my $command = $ARGV[0];
-	if($command eq "read"){
+	if($command eq "test"){
+		my $status = $oauthobj->update({ status => 'Perlで投稿テスト'.time() });
+		print Dumper $status;
+	}
+
+	elsif($command eq "read"){
 		my @addtext = ();
 		my $array_ref = $oauthobj->friends_timeline({count => '200'});
 		foreach my $hash_ref(@$array_ref){ push(@addtext,$hash_ref->{'text'}); }
