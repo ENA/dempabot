@@ -54,3 +54,5 @@ MeCabを開発し、フリーで提供してくださる工藤拓氏に多大な
 
 * Ver.1.0 [2010/03/31]
  + 初期版
+
+Join the chat at https://gitter.im/ENA/dempabot
